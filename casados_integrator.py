@@ -385,14 +385,13 @@ class CasadosIntegratorSensAdj(Callback):
         self.acados_integrator.options_set("sens_hess", False)
         status = self.acados_integrator.solve()
 
-        S_adj = self.acados_integrator.get("S_adj")   # (nx+nu,)
+        S_adj = self.acados_integrator.get("S_adj")
 
         if self.print_level > 1:
             print(f"\nevaluated acados integrator in callback, got S_adj: {S_adj}\n")
 
         S_adj_x = S_adj[: self.nx]
-        S_adj_u = S_adj[self.nx :]
-        S_adj_p = np.concatenate([S_adj_u, np.zeros(self.n_extra)])
+        S_adj_p = np.concatenate([S_adj[self.nx :], np.zeros(self.n_extra)])
 
         self.casados_integrator.time_adj += self.acados_integrator.get("time_tot")
 
@@ -497,6 +496,31 @@ class CasadosIntegratorSensHess(Callback):
         elif i == 7:
             out = "S_adj_out_dt"
         return out
+
+    def get_name_out(self, i):
+            names = [
+                # d(S_adj_x0) / d(inputs)
+                "jac_S_adj_x0_x0",
+                "jac_S_adj_x0_p",
+                "jac_S_adj_x0_dt",
+                "jac_S_adj_x0_nominal_out",
+                "jac_S_adj_x0_adj_seed",
+
+                # d(S_adj_p) / d(inputs)
+                "jac_S_adj_p_x0",
+                "jac_S_adj_p_p",
+                "jac_S_adj_p_dt",
+                "jac_S_adj_p_nominal_out",
+                "jac_S_adj_p_adj_seed",
+
+                # d(S_adj_dt) / d(inputs)
+                "jac_S_adj_dt_x0",
+                "jac_S_adj_dt_p",
+                "jac_S_adj_dt_dt",
+                "jac_S_adj_dt_nominal_out",
+                "jac_S_adj_dt_adj_seed"
+            ]
+            return names[i]
 
     def get_n_in(self):
         return 8
