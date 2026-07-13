@@ -24,7 +24,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from casadi import Callback, Sparsity, Function, CasadiMeta
+from casadi import Callback, Sparsity, Function, CasadiMeta, DM
 import casadi
 from acados_template import AcadosSimSolver, AcadosSim, casadi_length
 import numpy as np
@@ -74,6 +74,11 @@ class CasadosIntegrator(Callback):
 
         self.nx = casadi_length(acados_sim.model.x)
         self.nu = casadi_length(acados_sim.model.u)
+        self.np_ = casadi_length(acados_sim.model.p)
+        self.npg = casadi_length(acados_sim.model.p_global)
+        self.nparam = self.nu + self.np_ + self.npg
+        self.n_extra = self.np_ + self.npg
+
         self.model_name = acados_sim.model.name
         self.print_level = 0
         # self.print_level = 1
@@ -120,7 +125,9 @@ class CasadosIntegrator(Callback):
         if i == 0:
             out = Sparsity.dense(self.nx)
         elif i == 1:
-            out = Sparsity.dense(self.nu)
+            out = Sparsity.dense(self.nparam)   # [u; p; p_global]
+        elif i == 2:
+            out = Sparsity.dense(1, 1)
         return out
 
     def get_sparsity_out(self, i):
@@ -132,10 +139,12 @@ class CasadosIntegrator(Callback):
             out = "x0"
         elif i == 1:
             out = "p"
+        elif i == 2:
+            out = "dt"
         return out
 
     def get_n_in(self):
-        return 2
+        return 3
 
     def get_n_out(self):
         return 1
@@ -146,16 +155,16 @@ class CasadosIntegrator(Callback):
     def eval(self, arg):
         # extract inputs
         x0 = np.array(arg[0])
-        u0 = np.array(arg[1])
+        param = np.array(arg[1])
+        dt = float(arg[2])
         if self.print_level:
-            print(f"CasadosIntegrator: x0 {x0} u0 {u0}")
+            print(f"CasadosIntegrator: x0 {x0} param {param} dt {dt}")
 
         self.acados_integrator.options_set("sens_forw", False)
         self.acados_integrator.options_set("sens_adj", False)
         self.acados_integrator.options_set("sens_hess", False)
         # set
-        self.acados_integrator.set("x", x0)
-        self.acados_integrator.set("u", u0)
+        self._set_solver_inputs(x0, param, dt)
 
         # solve
         status = self.acados_integrator.solve()
@@ -177,12 +186,9 @@ class CasadosIntegrator(Callback):
         return self.jac_callback
 
     def has_reverse(self, nadj) -> bool:
-        if nadj == 1:
-            return True
-        else:
-            return False
+        return nadj == 1
 
-    def get_reverse(self, *args) -> "casadi::Function":
+    def get_reverse(self, *args) -> "casadi.Function":
 
         if self.adj_callback is None:
             self.adj_callback = CasadosIntegratorSensAdj(self)
@@ -195,6 +201,19 @@ class CasadosIntegrator(Callback):
         self.time_adj = 0.0
         self.time_hess = 0.0
 
+    def _set_solver_inputs(self, x0, param, dt):
+        """Split the combined param vector and push everything into the solver."""
+        param = np.asarray(param).flatten()
+        u0 = param[: self.nu]
+        self.acados_integrator.set("x", np.asarray(x0).flatten())
+        self.acados_integrator.set("u", u0)
+        if self.np_ > 0:
+            self.acados_integrator.set("p", param[self.nu : self.nu + self.np_])
+        if self.npg > 0:
+            self.acados_integrator.set_p_global_and_precompute_dependencies(
+                param[self.nu + self.np_ :]
+            )
+        self.acados_integrator.set("T", float(dt))
 
 # NOTE: doesnt even get called -> dead end -> see https://github.com/casadi/casadi/issues/2019
 # def uses_output(self, *args) -> bool:
@@ -212,8 +231,10 @@ class CasadosIntegratorSensForw(Callback):
         self.acados_integrator = casados_integrator.acados_integrator
         self.casados_integrator = casados_integrator
 
-        self.nx = self.casados_integrator.nx
-        self.nu = self.casados_integrator.nu
+        self.nx = casados_integrator.nx
+        self.nu = casados_integrator.nu
+        self.nparam = casados_integrator.nparam
+        self.n_extra = casados_integrator.n_extra
         self.print_level = casados_integrator.print_level
 
         Callback.__init__(self)
@@ -224,50 +245,43 @@ class CasadosIntegratorSensForw(Callback):
         if i == 0:
             out = Sparsity.dense(self.nx)
         elif i == 1:
-            out = Sparsity.dense(self.nu)
+            out = Sparsity.dense(self.nparam)
         elif i == 2:
+            out = Sparsity.dense(1, 1)
+        elif i == 3:
             out = Sparsity.dense(self.nx)
         return out
 
     def get_sparsity_out(self, i):
         if i == 0:
             out = Sparsity.dense(self.nx, self.nx)
-        if i == 1:
-            out = Sparsity.dense(self.nx, self.nu)
+        elif i == 1:
+            out = Sparsity.dense(self.nx, self.nparam)
+        elif i == 2:
+            out = Sparsity(self.nx, 1)
         return out
 
     def get_name_in(self, i):
-        if i == 0:
-            out = "x0"
-        elif i == 1:
-            out = "u0"
-        elif i == 2:
-            out = "xf"
-        return out
+        return ["x0", "p", "dt", "xf"][i]
 
     def get_n_in(self):
-        return 3
-    
+        return 4
+
     def get_n_out(self):
-        return 2
+        return 3
 
     def get_name_out(self, i):
-        if i == 0:
-            out = "jac_xf_x0"
-        if i == 1:
-            out = "jac_xf_p"
-        return out
+        return ["jac_xf_x0", "jac_xf_p", "jac_xf_dt"][i]
 
     def eval(self, arg):
         # extract inputs
         x0 = np.array(arg[0])
-        u0 = np.array(arg[1])
+        param = np.array(arg[1])
+        dt = float(arg[2])
         if self.print_level:
-            print(f"CasadosIntegratorSensForw: x0 {x0} u0 {u0}")
+            print(f"CasadosIntegratorSensForw: x0 {x0} param {param} dt {dt}")
 
-        # set
-        self.acados_integrator.set("x", x0)
-        self.acados_integrator.set("u", u0)
+        self.casados_integrator._set_solver_inputs(x0, param, dt)
         self.acados_integrator.options_set("sens_forw", True)
         self.acados_integrator.options_set("sens_adj", False)
         self.acados_integrator.options_set("sens_hess", False)
@@ -279,7 +293,9 @@ class CasadosIntegratorSensForw(Callback):
         # S_forw = np.ascontiguousarray(S_forw.reshape(S_forw.shape, order="F"))
         self.casados_integrator.time_forw += self.acados_integrator.get("time_tot")
 
-        return [S_forw[:, :self.nx], S_forw[:, self.nx:]]
+        jac_x0 = S_forw[:, : self.nx]
+        jac_p = np.hstack([S_forw[:, self.nx :], np.zeros((self.nx, self.n_extra))])
+        return [jac_x0, jac_p, DM(self.nx, 1)]
 
     def has_jacobian(self, *args) -> bool:
         return False
@@ -311,6 +327,8 @@ class CasadosIntegratorSensAdj(Callback):
 
         self.nx = casados_integrator.nx
         self.nu = casados_integrator.nu
+        self.nparam = casados_integrator.nparam
+        self.n_extra = casados_integrator.n_extra
         self.print_level = casados_integrator.print_level
 
         Callback.__init__(self)
@@ -320,10 +338,12 @@ class CasadosIntegratorSensAdj(Callback):
         if i == 0:
             out = Sparsity.dense(self.nx, 1)
         elif i == 1:
-            out = Sparsity.dense(self.nu, 1)
+            out = Sparsity.dense(self.nparam, 1)
         elif i == 2:
-            out = Sparsity(self.nx, 1)
+            out = Sparsity.dense(1, 1)
         elif i == 3:
+            out = Sparsity(self.nx, 1)
+        elif i == 4:
             out = Sparsity.dense(self.nx, 1)
         return out
 
@@ -331,65 +351,52 @@ class CasadosIntegratorSensAdj(Callback):
         if i == 0:
             out = Sparsity.dense(self.nx)
         elif i == 1:
-            out = Sparsity.dense(self.nu)
+            out = Sparsity.dense(self.nparam)
+        elif i == 2:
+            out = Sparsity(1, 1)
         return out
 
     def get_name_in(self, i):
-        if i == 0:
-            out = "x0"
-        elif i == 1:
-            out = "u0"
-        elif i == 2:
-            out = "nominal_out"
-        elif i == 3:
-            out = "adj_seed"
-        return out
+        return ["x0", "p", "dt", "nominal_out", "adj_seed"][i]
 
     def get_n_in(self):
-        return 4
+        return 5
 
     def get_n_out(self):
-        return 2
+        return 3
 
     def get_name_out(self, i):
-        if i == 0:
-            out = "S_adj_x0"
-        elif i == 1:
-            out = "S_adj_p"
-        return out
+        return ["S_adj_x0", "S_adj_p", "S_adj_dt"][i]
 
     def eval(self, arg):
         # extract inputs
         x0 = np.array(arg[0])
-        u0 = np.array(arg[1])
-        seed = np.array(arg[3])
+        param = np.array(arg[1])
+        dt = float(arg[2])
+        seed = np.array(arg[4])
         if self.print_level:
-            print(f"CasadosIntegratorSensAdj: x0 {x0} u0 {u0} seed {seed}")
+            print(f"CasadosIntegratorSensAdj: x0 {x0} param {param} dt {dt} seed {seed}")
 
         # set adj seed:
         self.acados_integrator.set("seed_adj", seed)
-        # set input
-        self.acados_integrator.set("x", x0)
-        self.acados_integrator.set("u", u0)
-
-        # solve
+        self.casados_integrator._set_solver_inputs(x0, param, dt)
         self.acados_integrator.options_set("sens_adj", True)
         self.acados_integrator.options_set("sens_forw", False)
         self.acados_integrator.options_set("sens_hess", False)
         status = self.acados_integrator.solve()
 
-        # output
-        S_adj = self.acados_integrator.get("S_adj")
+        S_adj = self.acados_integrator.get("S_adj")   # (nx+nu,)
 
         if self.print_level > 1:
             print(f"\nevaluated acados integrator in callback, got S_adj: {S_adj}\n")
 
         S_adj_x = S_adj[: self.nx]
         S_adj_u = S_adj[self.nx :]
+        S_adj_p = np.concatenate([S_adj_u, np.zeros(self.n_extra)])
 
         self.casados_integrator.time_adj += self.acados_integrator.get("time_tot")
 
-        return [S_adj_x, S_adj_u]
+        return [S_adj_x, S_adj_p, DM(1, 1)]
 
     def has_jacobian(self, *args) -> bool:
         return True
@@ -412,7 +419,8 @@ class CasadosIntegratorSensHess(Callback):
 
         self.nx = casados_integrator.nx
         self.nu = casados_integrator.nu
-
+        self.nparam = casados_integrator.nparam
+        self.n_extra = casados_integrator.n_extra
         self.print_level = casados_integrator.print_level
 
         Callback.__init__(self)
@@ -422,34 +430,53 @@ class CasadosIntegratorSensHess(Callback):
         if i == 0:
             out = Sparsity.dense(self.nx, 1)
         elif i == 1:
-            out = Sparsity.dense(self.nu, 1)
+            out = Sparsity.dense(self.nparam, 1)
         elif i == 2:
-            out = Sparsity.dense(self.nx, 1)
+            out = Sparsity.dense(1, 1)
         elif i == 3:
             out = Sparsity.dense(self.nx, 1)
         elif i == 4:
             out = Sparsity.dense(self.nx, 1)
         elif i == 5:
-            out = Sparsity.dense(self.nu, 1)
+            out = Sparsity.dense(self.nx, 1)
+        elif i == 6:
+            out = Sparsity.dense(self.nparam, 1)
+        elif i == 7:
+            out = Sparsity.dense(1, 1)
         return out
 
     def get_sparsity_out(self, i):
+        nx, nu, npar = self.nx, self.nu, self.nparam
         if i == 0:
-            out = Sparsity.dense(self.nx, self.nx)
+            out = Sparsity.dense(nx, nx)
         elif i == 1:
-            out = Sparsity.dense(self.nx, self.nu)
+            out = Sparsity.dense(nx, npar)
         elif i == 2:
-            out = Sparsity.dense(self.nx, self.nx)
+            out = Sparsity(nx, 1)
         elif i == 3:
-            out = Sparsity.dense(self.nx, self.nx)
+            out = Sparsity.dense(nx, nx)
         elif i == 4:
-            out = Sparsity.dense(self.nu, self.nx)
+            out = Sparsity.dense(nx, nx)
         elif i == 5:
-            out = Sparsity.dense(self.nu, self.nu)
+            out = Sparsity.dense(npar, nx)
         elif i == 6:
-            out = Sparsity.dense(self.nu, self.nx)
+            out = Sparsity.dense(npar, npar)
         elif i == 7:
-            out = Sparsity.dense(self.nu, self.nx)
+            out = Sparsity(npar, 1)
+        elif i == 8:
+            out = Sparsity.dense(npar, nx)
+        elif i == 9:
+            out = Sparsity.dense(npar, nx)
+        elif i == 10:
+            out = Sparsity(1, nx)
+        elif i == 11:
+            out = Sparsity(1, npar)
+        elif i == 12:
+            out = Sparsity(1, 1)
+        elif i == 13:
+            out = Sparsity(1, nx)
+        elif i == 14:
+            out = Sparsity(1, nx)
         return out
 
     def get_name_in(self, i):
@@ -465,53 +492,75 @@ class CasadosIntegratorSensHess(Callback):
             out = "S_adj_out_x"
         elif i == 5:
             out = "S_adj_out_u"
+        elif i == 6:
+            out = "S_adj_out_p"
+        elif i == 7:
+            out = "S_adj_out_dt"
         return out
 
     def get_n_in(self):
-        return 6
+        return 8
 
     def get_n_out(self):
-        return 8
+        return 15
 
     def eval(self, arg):
         # extract inputs
         x0 = np.array(arg[0])
-        seed = np.array(arg[3])
-        u0 = np.array(arg[1])
+        param = np.array(arg[1])
+        dt = float(arg[2])
+        seed = np.array(arg[4])
 
         if self.print_level:
-            print(f"CasadosIntegratorSensHess: x0 {x0} u0 {u0} seed {seed}")
+            print(f"CasadosIntegratorSensHess: x0 {x0} param {param} dt {dt} seed {seed}")
 
         # set adj seed:
         self.acados_integrator.set("seed_adj", seed)
-        # set input
-        self.acados_integrator.set("x", x0)
-        self.acados_integrator.set("u", u0)
-
-        # solve
+        self.casados_integrator._set_solver_inputs(x0, param, dt)
         self.acados_integrator.options_set("sens_hess", True)
         self.acados_integrator.options_set("sens_forw", True)
         self.acados_integrator.options_set("sens_adj", True)
         status = self.acados_integrator.solve()
 
-        # output
         S_hess = self.acados_integrator.get("S_hess")
         S_forw = self.acados_integrator.get("S_forw")
 
-        # NOTE: old casadi (<3.6) expects jacobian(S_adj, [x, u, nominal_out, seed_adj])
-        #                            = [S_hess(for x,u), zeros(nx+nu, nx), S_forw ]
-        # out = np.concatenate(
-        #     [S_hess, np.zeros((self.nx + self.nu, self.nx)), S_forw.T], axis=1
-        # )
-
         self.casados_integrator.time_hess += self.acados_integrator.get("time_tot")
 
-        # new casadi (>=3.6) jacobian api wants:
-        # in: ['x0', 'u0', 'nominal_out', 'adj_seed', 'out_S_adj_x0', 'out_S_adj_p']
-        # out: ['jac_S_adj_x0_x0', 'jac_S_adj_x0_u0', 'jac_S_adj_x0_nominal_out', 'jac_S_adj_x0_adj_seed',
-        # 'jac_S_adj_p_x0', 'jac_S_adj_p_u0', 'jac_S_adj_p_nominal_out', 'jac_S_adj_p_adj_seed']
-        return [S_hess[:self.nx, :self.nx], S_hess[:self.nx, self.nx:], np.zeros((self.nx, self.nx)), (S_forw.T)[:self.nx, :],
-                S_hess[self.nx:, :self.nx], S_hess[self.nx:, self.nx:], np.zeros((self.nu, self.nx)), (S_forw.T)[self.nx:, :]]
+        nx, nu, ne = self.nx, self.nu, self.n_extra
+
+        Hxx = S_hess[:nx, :nx]
+        Hxu = S_hess[:nx, nx:]
+        Hux = S_hess[nx:, :nx]
+        Huu = S_hess[nx:, nx:]
+        FxT = S_forw[:, :nx].T
+        FuT = (S_forw[:, nx:]).T
+
+        Hxp = np.hstack([Hxu, np.zeros((nx, ne))])
+        Hpx = np.vstack([Hux, np.zeros((ne, nx))])
+        Hpp = np.hstack([
+            np.vstack([Huu, np.zeros((ne, nu))]),
+            np.zeros((nu + ne, ne)),
+        ])
+        FpT = np.vstack([FuT, np.zeros((ne, nx))])
+
+        return [
+            Hxx,
+            Hxp,
+            DM(nx, 1),
+            np.zeros((nx, nx)),
+            FxT,
+            Hpx,
+            Hpp,
+            DM(self.nparam, 1),
+            np.zeros((self.nparam, nx)),
+            FpT,
+            DM(1, nx),
+            DM(1, self.nparam),
+            DM(1, 1),
+            DM(1, nx),
+            DM(1, nx),
+        ]
 
     def has_jacobian(self, *args) -> bool:
         return False
