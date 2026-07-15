@@ -34,22 +34,8 @@ import json, os
 import numpy as np
 import casadi as ca
 from chain_mass_model import export_chain_mass_model, export_disturbed_chain_mass_model
-from acados_template import AcadosSim, AcadosSimSolver
 
-
-def np_array_to_list(np_array):
-    if isinstance(np_array, (np.ndarray,)):
-        return np_array.tolist()
-    elif isinstance(np_array, (ca.SX,)):
-        return ca.DM(np_array).full()
-    elif isinstance(np_array, (ca.DM,)):
-        return np_array.full()
-    elif isinstance(np_array, (np.integer,)):
-        return int(np_array)
-    elif isinstance(np_array, (np.floating,)):
-        return float(np_array)
-    else:
-        raise TypeError(f"Cannot serialize object of type {type(np_array)}.")
+from acados_template import AcadosSim, AcadosSimSolver, make_object_json_dumpable
 
 
 def get_chain_params():
@@ -161,7 +147,7 @@ def save_results_as_json(
     json_file = get_results_filename_from_params(chain_params, integrator_opts, id=id)
 
     with open(json_file, "w") as f:
-        json.dump(results, f, default=np_array_to_list, indent=4, sort_keys=True)
+        json.dump(results, f, default=make_object_json_dumpable, indent=4, sort_keys=True)
 
     return
 
@@ -196,8 +182,7 @@ def export_chain_mass_integrator(chain_params):
     sim.solver_options.sim_method_num_stages = 2
     sim.solver_options.sim_method_num_steps = 2
 
-    # set prediction horizon
-    sim.solver_options.Tsim = chain_params["Ts"]
+    sim.solver_options.T = chain_params["Ts"]
 
     # acados_ocp_solver = AcadosOcpSolver(ocp, json_file = 'acados_ocp_' + model.name + '.json')
     acados_integrator = AcadosSimSolver(
