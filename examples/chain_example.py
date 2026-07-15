@@ -7,6 +7,7 @@ from acados_template import AcadosOcp, AcadosOcpSolver
 from chain_mass_model import export_chain_mass_model
 
 from plot_utils import *
+from casados_integrator import CasadosIntegrator
 from utils import create_casados_integrator, generate_butcher_tableu
 from chain_utils import (
     compute_steady_state,
@@ -240,7 +241,7 @@ def run_nominal_control_open_loop(chain_params, integrator_opts=None):
             casadi_integrator = integrator(
                 "casadi_integrator",
                 "collocation",
-                {"x": model.x, "p": model.u, "ode": model.f_expl_expr},
+                {"x": model.x, "u": model.u, "ode": model.f_expl_expr},
                 {
                     "tf": dT,
                     "collocation_scheme": integrator_opts["collocation_scheme"],
@@ -253,7 +254,7 @@ def run_nominal_control_open_loop(chain_params, integrator_opts=None):
             casadi_integrator = integrator(
                 "casadi_integrator",
                 integrator_opts["implementation"],
-                {"x": model.x, "p": model.u, "ode": model.f_expl_expr},
+                {"x": model.x, "u": model.u, "ode": model.f_expl_expr},
                 {
                     "tf": dT,
                     "abstol": integrator_opts["tol"] / integrator_opts["num_steps"]
@@ -267,7 +268,7 @@ def run_nominal_control_open_loop(chain_params, integrator_opts=None):
             casadi_integrator = integrator(
                 "casadi_integrator",
                 "rk",
-                {"x": model.x, "p": model.u, "ode": model.f_expl_expr},
+                {"x": model.x, "u": model.u, "ode": model.f_expl_expr},
                 {
                     "tf": dT,
                     "jit": False,  # error Code generation not supported for RungeKutta
@@ -323,13 +324,16 @@ def run_nominal_control_open_loop(chain_params, integrator_opts=None):
                 )
                 x = X_sym[:, k]
                 u = U_sym[:, k]
-                x_next = integrator_list[k](x0=x, p=u)["xf"]
+                x_next = integrator_list[k](x0=x, u=u, p=dT)["xf"]
                 opti.subject_to(X_sym[:, k + 1] == x_next)
         else:
             for k in range(N):
                 x = X_sym[:, k]
                 u = U_sym[:, k]
-                x_next = casadi_integrator(x0=x, p=u)["xf"]
+                if isinstance(casadi_integrator, CasadosIntegrator):
+                    x_next = casadi_integrator(x0=x, u=u, p=dT)["xf"]
+                else:
+                    x_next = casadi_integrator(x0=x, u=u)["xf"]
                 opti.subject_to(X_sym[:, k + 1] == x_next)
 
         # set cost
@@ -446,7 +450,7 @@ def run_nominal_control_open_loop(chain_params, integrator_opts=None):
 
             # solve ocp
             status = acados_ocp_solver.solve()
-            timings[i] = acados_ocp_solver.get_stats("time_tot")[0]
+            timings[i] = acados_ocp_solver.get_stats("time_tot")
 
             # if i == 0:
             acados_ocp_solver.print_statistics()

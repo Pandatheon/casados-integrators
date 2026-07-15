@@ -34,7 +34,22 @@ import json, os
 import numpy as np
 import casadi as ca
 from chain_mass_model import export_chain_mass_model, export_disturbed_chain_mass_model
-from acados_template import AcadosSim, AcadosSimSolver, np_array_to_list
+from acados_template import AcadosSim, AcadosSimSolver
+
+
+def np_array_to_list(np_array):
+    if isinstance(np_array, (np.ndarray,)):
+        return np_array.tolist()
+    elif isinstance(np_array, (ca.SX,)):
+        return ca.DM(np_array).full()
+    elif isinstance(np_array, (ca.DM,)):
+        return np_array.full()
+    elif isinstance(np_array, (np.integer,)):
+        return int(np_array)
+    elif isinstance(np_array, (np.floating,)):
+        return float(np_array)
+    else:
+        raise TypeError(f"Cannot serialize object of type {type(np_array)}.")
 
 
 def get_chain_params():
@@ -170,6 +185,7 @@ def export_chain_mass_integrator(chain_params):
     model = export_disturbed_chain_mass_model(chain_params)
     sim.model = model
 
+    sim.solver_options.T = chain_params["Ts"]
     # disturbances
     nparam = 3 * M
     sim.parameter_values = np.zeros((nparam,))
@@ -185,7 +201,7 @@ def export_chain_mass_integrator(chain_params):
 
     # acados_ocp_solver = AcadosOcpSolver(ocp, json_file = 'acados_ocp_' + model.name + '.json')
     acados_integrator = AcadosSimSolver(
-        sim, json_file="acados_sim_" + model.name + ".json"
+        sim, json_file="acados_sim_" + model.name + ".json",
     )
 
     return acados_integrator
