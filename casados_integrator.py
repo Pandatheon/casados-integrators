@@ -26,7 +26,7 @@
 
 from casadi import Callback, Sparsity, Function, CasadiMeta, DM
 import casadi
-from acados_template import AcadosSimSolver, AcadosSim, casadi_length
+from acados_template import AcadosSimSolver, AcadosSim, casadi_length, is_empty
 import numpy as np
 
 
@@ -74,9 +74,11 @@ class CasadosIntegrator(Callback):
 
         self.nx = casadi_length(acados_sim.model.x)
         self.nu = casadi_length(acados_sim.model.u)
+        if not is_empty(acados_sim.model.p_global):
+            acados_sim.model.p = casadi.vertcat(acados_sim.model.p, acados_sim.model.p_global)
+            acados_sim.model.p_global = []
         self.np_ = casadi_length(acados_sim.model.p)
-        self.npg = casadi_length(acados_sim.model.p_global)
-        self.nparam = self.np_ + self.npg + 1
+        self.nparam = self.np_ + 1 # [p; dt]
 
         self.model_name = acados_sim.model.name
         self.print_level = 0
@@ -207,10 +209,6 @@ class CasadosIntegrator(Callback):
         self.acados_integrator.set("u", np.asarray(u0).flatten())
         if self.np_ > 0:
             self.acados_integrator.set("p", p[: self.np_])
-        if self.npg > 0:
-            self.acados_integrator.set_p_global_and_precompute_dependencies(
-                p[self.np_ : self.np_ + self.npg]
-            )
         self.acados_integrator.set("T", float(p[-1]))
 
 # NOTE: doesnt even get called -> dead end -> see https://github.com/casadi/casadi/issues/2019
