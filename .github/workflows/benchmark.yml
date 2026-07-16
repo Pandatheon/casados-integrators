@@ -22,7 +22,7 @@ jobs:
           path: ${{github.workspace}}/casados-integrators
           submodules: 'recursive'
       - name: Setup environment
-        uses: ./casados-integrators/.github/actions/setup-acados
+        uses: ./.github/actions/setup-acados
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install current project
