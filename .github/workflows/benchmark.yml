@@ -1,0 +1,38 @@
+
+name: Example tests for casados-integrators
+
+
+on:
+  push:
+  pull_request:
+
+
+jobs:
+  tests:
+    name: Example tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: ${{github.workspace}}/casados-integrators
+          submodules: 'recursive'
+      - name: Setup environment
+        uses: ./casados-integrators/.github/actions/setup-acados
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install current project
+        working-directory: ${{github.workspace}}/casados-integrators
+        run: |
+          pip install -e .
+      - name: Run tests
+        working-directory: ${{github.workspace}}/casados-integrators
+        run: |
+          echo "Running problem tests..."
+          python examples/pendulum_tests.py
+          python examples/chain_example.py
+          python examples/test_parameters.py
