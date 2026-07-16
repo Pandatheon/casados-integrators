@@ -19,18 +19,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          path: ${{github.workspace}}/casados-integrators
           submodules: 'recursive'
       - name: Setup environment
         uses: ./.github/actions/setup-acados
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install current project
-        working-directory: ${{github.workspace}}/casados-integrators
+        working-directory: .
         run: |
           pip install -e .
       - name: Run tests
-        working-directory: ${{github.workspace}}/casados-integrators
+        working-directory: .
         run: |
           echo "Running problem tests..."
           python examples/pendulum_tests.py
