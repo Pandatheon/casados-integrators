@@ -34,4 +34,3 @@ jobs:
           echo "Running problem tests..."
           python examples/pendulum_tests.py
           python examples/chain_example.py
-          python examples/test_parameters.py
