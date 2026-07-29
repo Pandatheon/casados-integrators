@@ -55,6 +55,9 @@ class CasadosIntegrator(Callback):
         - first order adjoint sensitivities (via get_reverse())
         - second order sensitivities (hessians) with adjoint seed (via get_reverse() + get_jacobian()) (for acados integrators that offer second order senitivities)
     This makes it fully functional within CasADi NLPs
+
+    The control variables (u) is separated from fixed parameters (p), the callback now has 4 inputs: x0, u, p, dt,
+    but the sensitivities w.r.t p and dt are not computed.
     """
 
     def __init__(self, acados_sim: AcadosSim, use_cython=True, code_reuse=False):
