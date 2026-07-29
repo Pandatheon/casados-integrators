@@ -74,9 +74,7 @@ class CasadosIntegrator(Callback):
 
         self.nx = casadi_length(acados_sim.model.x)
         self.nu = casadi_length(acados_sim.model.u)
-        if not is_empty(acados_sim.model.p_global):
-            acados_sim.model.p = casadi.vertcat(acados_sim.model.p, acados_sim.model.p_global)
-            acados_sim.model.p_global = []
+        acados_sim.model.p = acados_sim.model.p
         self.np_ = casadi_length(acados_sim.model.p)
         self.nparam = self.np_ + 1 # [p; dt]
 
@@ -128,7 +126,7 @@ class CasadosIntegrator(Callback):
         elif i == 1:
             out = Sparsity.dense(self.nu)
         elif i == 2:
-            out = Sparsity.dense(self.nparam)   # [p; p_global; dt]
+            out = Sparsity.dense(self.nparam)   # [p; dt]
         return out
 
     def get_sparsity_out(self, i):
