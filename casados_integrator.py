@@ -204,7 +204,8 @@ class CasadosIntegrator(Callback):
         self.time_hess = 0.0
 
     def _set_solver_inputs(self, x0, u0, p):
-        """Split the combined param vector and push everything into the solver."""
+        """Set x0, u and parameters in the integrator.
+        NOTE: p is the combined param vector containing standard parameters and integration time T."""
         p = np.asarray(p).flatten()
         self.acados_integrator.set("x", np.asarray(x0).flatten())
         self.acados_integrator.set("u", np.asarray(u0).flatten())
